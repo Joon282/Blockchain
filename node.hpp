@@ -16,4 +16,4 @@ public:
     Node(const json& block, const std::vector<PeerAddress>& peers, uint16_t port);
     void run_consensus();
     void run_server();
-}
+};
