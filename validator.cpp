@@ -4,25 +4,29 @@
 #include <algorithm>
 #include <string>
 #include <iostream>
+static std::vector<unsigned char> decode_hex(const std::string& hex);
+static int verify_ed25519(EVP_PKEY* pkey, const unsigned char* sig, size_t sig_len, const unsigned char* msg, size_t msg_len);
+using json = nlohmann::json;
 
-bool Validator::validate_transaction(const json& transaction, const std::unordered_map<std::string, int>& nonces, const std::vector<json>& mem_pool) {
+bool Validator::validate_transaction(const json& transaction, const std::unordered_map<std::string, int>& nonces, const std::vector<json>& mem_pool){
     if (!transaction.contains("sender") || !transaction.contains("message") || !transaction.contains("nonce") || !transaction.contains("signature")) {
         return false;
     }
     if (!transaction["sender"].is_string() || !transaction["message"].is_string() || !transaction["nonce"].is_number_integer() || !transaction["signature"].is_string()) {
         return false;
     }
-    if (!valid_hex(transaction["sender"].get<std::string>(), 64) || !valid_hex(transaction["signature"].get<std::string>(), 128) || !valid_message(transaction["message"].get<std::string>())) {
+    std::string sender = transaction["sender"].get<std::string>();
+    std::string message = transaction["message"].get<std::string>();
+    int nonce = transaction["nonce"].get<int>();
+    std::string signature = transaction["signature"].get<std::string>();
+
+    if (!valid_hex(sender, 64) || !valid_hex(signature, 128) || !valid_message(message)) {
         return false;
     }
-    const std::string& sender = transaction["sender"].get<std::string>();
-    const int nonce = transaction["nonce"].get<int>();
-    const std::string& message = transaction["message"].get<std::string>();
-    const std::string& signature = transaction["signature"].get<std::string>();
-
     if (nonce < 0) {
         return false;
     }
+
     int new_nonce = 0;
     auto it = nonces.find(sender);
     if (it != nonces.end()) {
@@ -31,37 +35,41 @@ bool Validator::validate_transaction(const json& transaction, const std::unorder
     if (nonce != new_nonce) {
         return false;
     }
-    for (const auto& tx : mem_pool) {
-        if (tx["sender"] == sender && tx["nonce"] == nonce) {
+
+    if (!verify_signature(transaction)) {
+        return false;
+    }
+    for (const auto& pool_transaction : mem_pool) {
+        if (pool_transaction["sender"] == sender && pool_transaction["nonce"] == nonce) {
+            return false;
+        }
+    }
+    return true;
+}
+bool Validator::valid_hex(const std::string& str, size_t len){
+    if (str.size() != len) {
+        return false;
+    }
+    for (const char& c : str) {
+        if (!std::isxdigit(c) || std::isupper(c)) {
             return false;
         }
     }
     return true;
 }
 
-bool Validator::valid_hex(const std::string& str, size_t len) {
-    if (str.length() != len) {
+bool Validator::valid_message(const std::string& str){
+    if (str.size() > 70){
         return false;
     }
-    for (const char& c : str){
-        if (!std::isxdigit(static_cast<unsigned char>(c)) || (std::isupper(static_cast<unsigned char>(c)))) {
+    for (const char& c : str) {
+        if (!std::isalnum(c) && c != ' ' && c != '-') {
             return false;
         }
     }
     return true;
 }
 
-bool Validator::valid_message(const std::string& str) {
-    if (str.length() > 70){
-        return false;
-    }
-    for (const char& c :str){
-        if (!std::isalnum(c) && c != ' ' && c != '-'){
-            return false;
-        }
-    }
-    return true;
-}
 std::vector<unsigned char> decode_hex(const std::string& hex) {
     std::vector<unsigned char> bytes;
     for (size_t i = 0; i < hex.size(); i += 2) {
@@ -86,14 +94,14 @@ int verify_ed25519(EVP_PKEY* pkey, const unsigned char* sig, size_t sig_len, con
 }
 
 bool Validator::verify_signature(const json& transaction) {
-    std::string sender = transaction["sender"].get<std::string>();
-    std::string message = transaction["message"].get<std::string>();
-    int nonce = transaction["nonce"].get<int>();
+    std::string sender    = transaction["sender"].get<std::string>();
+    std::string message   = transaction["message"].get<std::string>();
+    int nonce     = transaction["nonce"].get<int>();
     std::string signature = transaction["signature"].get<std::string>();
 
     std::string string_signature =  "{\"message\": \"" + message + "\", \"nonce\": " + std::to_string(nonce) + ", \"sender\": \"" + sender + "\"}";
 
-    std::vector<unsigned char> sender_b = decode_hex(transaction["sender"].get<std::string>());
+    std::vector<unsigned char> sender_b    = decode_hex(transaction["sender"].get<std::string>());
     std::vector<unsigned char> signature_b = decode_hex(transaction["signature"].get<std::string>());
 
     EVP_PKEY* pkey = EVP_PKEY_new_raw_public_key(
@@ -119,3 +127,4 @@ bool Validator::verify_signature(const json& transaction) {
     EVP_PKEY_free(pkey);
     return result == 1;
 }
+

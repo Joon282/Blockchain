@@ -1,8 +1,9 @@
-#include <string>
+#include "hasher.hpp"
 #include <nlohmann/json.hpp>
-#include <hasher.hpp>
 #include <openssl/sha.h>
 #include <sstream>
+#include <iomanip>
+
 using json = nlohmann::json;
 
 std::string Hasher::hash(const json& data) {
